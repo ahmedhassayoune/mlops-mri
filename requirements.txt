@@ -1,0 +1,10 @@
+apache-airflow
+dvc[s3]
+mlflow
+pydicom
+nibabel
+torch
+torchvision
+fastapi
+uvicorn
+boto3

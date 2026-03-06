@@ -1,0 +1,15 @@
+# Data
+data/
+*.dcm
+*.nii
+*.nii.gz
+
+# Credentials
+.env
+*.json
+kaggle.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
