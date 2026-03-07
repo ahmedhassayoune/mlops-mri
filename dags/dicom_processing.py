@@ -29,7 +29,7 @@ LOCAL_PROCESSED = "/tmp/mri_processed"
 MODALITIES = ["FLAIR", "T1w", "T1wCE", "T2w"]
 
 # Tune based on worker resources / S3 rate limits
-MAX_PARALLEL_PATIENTS = 4
+MAX_PARALLEL_PATIENTS = 2
 
 
 # ── Helper functions (pure logic, no Airflow deps) ────
