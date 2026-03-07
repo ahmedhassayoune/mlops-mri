@@ -29,7 +29,7 @@ LOCAL_PROCESSED = "/tmp/mri_processed"
 MODALITIES = ["FLAIR", "T1w", "T1wCE", "T2w"]
 
 # Tune based on worker resources / S3 rate limits
-MAX_PARALLEL_PATIENTS = 4
+MAX_PARALLEL_PATIENTS = 2
 
 
 @dag(
@@ -171,10 +171,7 @@ def dicom_to_nifti_pipeline():
     converted = convert_dicom_to_nifti.expand(patient_id=downloaded)
     uploaded = upload_to_s3.expand(patient_id=converted)
 
-    cleanup.expand(patient_id=ids)
-
-    checked >> downloaded >> converted >> uploaded
-    uploaded >> cleanup
+    cleanup.expand(patient_id=uploaded)
 
 
 dicom_to_nifti_pipeline()
