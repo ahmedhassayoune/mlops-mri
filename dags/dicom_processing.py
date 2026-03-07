@@ -146,7 +146,7 @@ def dicom_to_nifti_pipeline():
 
         result = sorted(patient_ids)
         log.info("Discovered %d patients: %s", len(result), result)
-        return result[:4]
+        return result
 
     @task
     def process_patient(patient_id: str) -> str:
