@@ -8,3 +8,4 @@ torchvision
 fastapi
 uvicorn
 boto3
+SimpleITK
