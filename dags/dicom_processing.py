@@ -1,9 +1,24 @@
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from datetime import datetime
-import subprocess
-import boto3
+"""
+DAG: DICOM → NIfTI conversion pipeline with dynamic task mapping.
+
+Discovers every patient ID under raw/train/ in S3, then processes each
+patient independently:  check → download → convert → upload → cleanup.
+
+Already-processed patients are skipped automatically.
+"""
+from __future__ import annotations
+
+import logging
 import os
+import shutil
+import subprocess
+
+import boto3
+from airflow.decorators import dag, task
+from airflow.exceptions import AirflowSkipException
+from pendulum import datetime
+
+log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────
 S3_BUCKET = "s3-mlops-mri-ahassayoune"
@@ -11,92 +26,155 @@ RAW_PREFIX = "raw/train"
 PROCESSED_PREFIX = "processed/train"
 LOCAL_RAW = "/tmp/mri_raw"
 LOCAL_PROCESSED = "/tmp/mri_processed"
+MODALITIES = ["FLAIR", "T1w", "T1wCE", "T2w"]
 
-# ── Task 1: Download a sample from S3 ─────────────────
-def download_from_s3(**context):
-    s3 = boto3.client("s3")
-    os.makedirs(LOCAL_RAW, exist_ok=True)
+# Tune based on worker resources / S3 rate limits
+MAX_PARALLEL_PATIENTS = 4
 
-    # Start with one patient for testing
-    patient_id = "00000"
-    modalities = ["FLAIR", "T1w", "T1wCE", "T2w"]
 
-    for modality in modalities:
-        prefix = f"{RAW_PREFIX}/{patient_id}/{modality}/"
-        local_dir = f"{LOCAL_RAW}/{patient_id}/{modality}"
-        os.makedirs(local_dir, exist_ok=True)
-
-        response = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
-        for obj in response.get("Contents", []):
-            filename = obj["Key"].split("/")[-1]
-            s3.download_file(S3_BUCKET, obj["Key"], f"{local_dir}/{filename}")
-
-    print(f"✅ Downloaded patient {patient_id} from S3")
-
-# ── Task 2: Convert DICOM → NIfTI ─────────────────────
-def convert_dicom_to_nifti(**context):
-    patient_id = "00000"
-    modalities = ["FLAIR", "T1w", "T1wCE", "T2w"]
-
-    for modality in modalities:
-        input_dir = f"{LOCAL_RAW}/{patient_id}/{modality}"
-        output_dir = f"{LOCAL_PROCESSED}/{patient_id}/{modality}"
-        os.makedirs(output_dir, exist_ok=True)
-
-        # dcm2niix does the heavy lifting
-        result = subprocess.run([
-            "dcm2niix",
-            "-z", "y",          # gzip output → .nii.gz
-            "-o", output_dir,   # output directory
-            input_dir           # input DICOM directory
-        ], capture_output=True, text=True)
-
-        print(result.stdout)
-        if result.returncode != 0:
-            raise Exception(f"dcm2niix failed: {result.stderr}")
-
-    print(f"✅ Converted patient {patient_id} to NIfTI")
-
-# ── Task 3: Upload NIfTI files back to S3 ─────────────
-def upload_to_s3(**context):
-    s3 = boto3.client("s3")
-    patient_id = "00000"
-
-    for root, dirs, files in os.walk(f"{LOCAL_PROCESSED}/{patient_id}"):
-        for file in files:
-            local_path = os.path.join(root, file)
-            # Reconstruct the S3 key
-            relative_path = local_path.replace(f"{LOCAL_PROCESSED}/", "")
-            s3_key = f"{PROCESSED_PREFIX}/{relative_path}"
-
-            s3.upload_file(local_path, S3_BUCKET, s3_key)
-            print(f"  uploaded → s3://{S3_BUCKET}/{s3_key}")
-
-    print(f"✅ Uploaded processed files to S3")
-
-# ── DAG Definition ─────────────────────────────────────
-with DAG(
+@dag(
     dag_id="dicom_to_nifti_pipeline",
     start_date=datetime(2024, 1, 1),
-    schedule=None,          # manual trigger for now
+    schedule=None,
     catchup=False,
     tags=["mri", "dicom", "processing"],
-) as dag:
+    max_active_tasks=MAX_PARALLEL_PATIENTS,
+)
+def dicom_to_nifti_pipeline():
+    """DICOM → NIfTI for every patient in the S3 dataset."""
 
-    t1 = PythonOperator(
-        task_id="download_from_s3",
-        python_callable=download_from_s3,
-    )
+    # ── Task 1: Discover all patient IDs ──────────────
+    @task
+    def discover_patients() -> list[str]:
+        """List every patient-id folder under raw/train/ in S3."""
+        s3 = boto3.client("s3")
+        paginator = s3.get_paginator("list_objects_v2")
+        patient_ids: set[str] = set()
 
-    t2 = PythonOperator(
-        task_id="convert_dicom_to_nifti",
-        python_callable=convert_dicom_to_nifti,
-    )
+        for page in paginator.paginate(
+            Bucket=S3_BUCKET, Prefix=f"{RAW_PREFIX}/", Delimiter="/"
+        ):
+            for cp in page.get("CommonPrefixes", []):
+                patient_id = cp["Prefix"].rstrip("/").split("/")[-1]
+                patient_ids.add(patient_id)
 
-    t3 = PythonOperator(
-        task_id="upload_to_s3",
-        python_callable=upload_to_s3,
-    )
+        result = sorted(patient_ids)
+        log.info("Discovered %d patients: %s", len(result), result)
+        return result
 
-    # Define execution order
-    t1 >> t2 >> t3
+    # ── Task 2: Skip if already processed ─────────────
+    @task
+    def check_if_processed(patient_id: str) -> str:
+        """Raise AirflowSkipException when all modalities already exist
+        under processed/train/<patient_id>/ so downstream tasks are skipped."""
+        s3 = boto3.client("s3")
+        for modality in MODALITIES:
+            resp = s3.list_objects_v2(
+                Bucket=S3_BUCKET,
+                Prefix=f"{PROCESSED_PREFIX}/{patient_id}/{modality}/",
+                MaxKeys=1,
+            )
+            if resp.get("KeyCount", 0) == 0:
+                log.info(
+                    "Patient %s needs processing (missing %s)",
+                    patient_id,
+                    modality,
+                )
+                return patient_id
+
+        raise AirflowSkipException(
+            f"Patient {patient_id} already fully processed — skipping"
+        )
+
+    # ── Task 3: Download DICOMs from S3 ───────────────
+    @task
+    def download_from_s3(patient_id: str) -> str:
+        """Download all DICOM files for one patient."""
+        s3 = boto3.client("s3")
+        paginator = s3.get_paginator("list_objects_v2")
+
+        for modality in MODALITIES:
+            local_dir = os.path.join(LOCAL_RAW, patient_id, modality)
+            os.makedirs(local_dir, exist_ok=True)
+
+            for page in paginator.paginate(
+                Bucket=S3_BUCKET,
+                Prefix=f"{RAW_PREFIX}/{patient_id}/{modality}/",
+            ):
+                for obj in page.get("Contents", []):
+                    filename = obj["Key"].rsplit("/", 1)[-1]
+                    s3.download_file(
+                        S3_BUCKET,
+                        obj["Key"],
+                        os.path.join(local_dir, filename),
+                    )
+
+        log.info("Downloaded patient %s from S3", patient_id)
+        return patient_id
+
+    # ── Task 4: Convert DICOM → NIfTI ─────────────────
+    @task
+    def convert_dicom_to_nifti(patient_id: str) -> str:
+        """Run dcm2niix on each modality for one patient."""
+        for modality in MODALITIES:
+            input_dir = os.path.join(LOCAL_RAW, patient_id, modality)
+            output_dir = os.path.join(LOCAL_PROCESSED, patient_id, modality)
+            os.makedirs(output_dir, exist_ok=True)
+
+            result = subprocess.run(
+                ["dcm2niix", "-z", "y", "-o", output_dir, input_dir],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            log.info(result.stdout)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"dcm2niix failed for {patient_id}/{modality}: {result.stderr}"
+                )
+
+        log.info("Converted patient %s to NIfTI", patient_id)
+        return patient_id
+
+    # ── Task 5: Upload NIfTI files back to S3 ─────────
+    @task
+    def upload_to_s3(patient_id: str) -> str:
+        """Upload every NIfTI produced for one patient."""
+        s3 = boto3.client("s3")
+        patient_root = os.path.join(LOCAL_PROCESSED, patient_id)
+
+        for root, _dirs, files in os.walk(patient_root):
+            for fname in files:
+                local_path = os.path.join(root, fname)
+                relative = os.path.relpath(local_path, LOCAL_PROCESSED)
+                s3_key = f"{PROCESSED_PREFIX}/{relative}"
+                s3.upload_file(local_path, S3_BUCKET, s3_key)
+                log.info("Uploaded → s3://%s/%s", S3_BUCKET, s3_key)
+
+        log.info("Uploaded patient %s to S3", patient_id)
+        return patient_id
+
+    # ── Task 6: Clean up local temp files ─────────────
+    @task(trigger_rule="all_done")
+    def cleanup(patient_id: str) -> None:
+        """Remove raw & processed temp dirs for one patient."""
+        for base in (LOCAL_RAW, LOCAL_PROCESSED):
+            path = os.path.join(base, patient_id)
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+                log.info("Cleaned up %s", path)
+
+    # ── DAG wiring with dynamic task mapping ──────────
+    ids = discover_patients()
+    checked = check_if_processed.expand(patient_id=ids)
+    downloaded = download_from_s3.expand(patient_id=checked)
+    converted = convert_dicom_to_nifti.expand(patient_id=downloaded)
+    uploaded = upload_to_s3.expand(patient_id=converted)
+
+    cleanup.expand(patient_id=ids)
+
+    checked >> downloaded >> converted >> uploaded
+    uploaded >> cleanup
+
+
+dicom_to_nifti_pipeline()
