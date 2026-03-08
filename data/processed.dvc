@@ -1,0 +1,11 @@
+md5: a5df57e0328c08424e6a3697cd9f5977
+frozen: true
+deps:
+- md5: 1216260c8fbefc77f248943f87431a89.dir
+  size: 11272804013
+  nfiles: 4680
+  hash: md5
+  path: s3://s3-mlops-mri-ahassayoune/processed
+outs:
+- hash: md5
+  path: processed
