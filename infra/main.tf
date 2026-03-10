@@ -65,10 +65,10 @@ resource "aws_security_group" "mlops_sg" {
   }
 
   ingress {
-    from_port       = 5000
-    to_port         = 5000
-    protocol        = "tcp"
-    cidr_blocks     = ["${var.your_ip}/32"]
+    from_port   = 5000
+    to_port     = 5000
+    protocol    = "tcp"
+    cidr_blocks = ["${var.your_ip}/32"]
   }
 
   egress {
@@ -85,7 +85,7 @@ resource "aws_instance" "mlflow_server" {
   instance_type          = "t3.medium"
   key_name               = var.key_pair_name
   vpc_security_group_ids = [aws_security_group.mlops_sg.id]
-  iam_instance_profile   = aws_iam_instance_profile.mlflow_profile.name  # 👈
+  iam_instance_profile   = aws_iam_instance_profile.mlflow_profile.name # 👈
 
   user_data = <<-EOF
     #!/bin/bash
@@ -127,14 +127,14 @@ resource "aws_instance" "training" {
   instance_type          = "g4dn.xlarge"
   key_name               = var.key_pair_name
   vpc_security_group_ids = [aws_security_group.mlops_sg.id]
-  iam_instance_profile   = aws_iam_instance_profile.mlflow_profile.name  # 👈
+  iam_instance_profile   = aws_iam_instance_profile.mlflow_profile.name # 👈
 
   # ── Spot Instance config ──────────────────────────────
   instance_market_options {
     market_type = "spot"
     spot_options {
-      spot_instance_type             = "persistent"    # re-requests spot if interrupted
-      instance_interruption_behavior = "stop"          # stop (not terminate) on interruption
+      spot_instance_type             = "persistent" # re-requests spot if interrupted
+      instance_interruption_behavior = "stop"       # stop (not terminate) on interruption
     }
   }
 

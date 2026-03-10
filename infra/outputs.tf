@@ -4,7 +4,7 @@ output "mlflow_server_ip" {
 }
 
 output "mlflow_private_ip" {
-  value = aws_instance.mlflow_server.private_ip
+  value       = aws_instance.mlflow_server.private_ip
   description = "For training instance to access MLflow server (set MLFLOW_URI=http://<ip>:5000 in train.py)"
 }
 
