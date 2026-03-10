@@ -15,11 +15,11 @@ import mlflow.pytorch
 import pandas as pd
 
 # ── Config ────────────────────────────────────────────
-S3_BUCKET      = "mlops-mri-yourname"
+S3_BUCKET      = "s3-mlops-mri-ahassayoune"
 PROCESSED_KEY  = "processed/train"
 LABELS_KEY     = "raw/train_labels.csv"
 LOCAL_DATA_DIR = "/tmp/nifti"
-MLFLOW_URI     = "http://<mlflow_server_ip>:5000"  # ← paste your MLflow IP
+MLFLOW_URI     = "http://<private-ip>:5000"  # ← paste your MLflow IP
 MODALITY       = "FLAIR"   # start with one modality
 BATCH_SIZE     = 16
 EPOCHS         = 10
@@ -76,9 +76,10 @@ def download_data(patient_ids):
         response = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
 
         for obj in response.get("Contents", []):
+            if not obj["Key"].endswith(".nii.gz"):
+                continue
             local_path = f"{local_dir}/image.nii.gz"
-            if not os.path.exists(local_path):
-                s3.download_file(S3_BUCKET, obj["Key"], local_path)
+            s3.download_file(S3_BUCKET, obj["Key"], local_path)
 
     print(f"✅ Downloaded {len(patient_ids)} patients")
 
@@ -106,8 +107,8 @@ def train():
     s3.download_file(S3_BUCKET, LABELS_KEY, "/tmp/train_labels.csv")
     df = pd.read_csv("/tmp/train_labels.csv")
 
-    patient_ids = df["BraTS21ID"].astype(str).str.zfill(5).tolist()
-    labels      = df["MGMT_value"].tolist()
+    patient_ids = df["BraTS21ID"].astype(str).str.zfill(5).tolist()[:32]
+    labels      = df["MGMT_value"].tolist()[:32]
 
     # Train/val split
     X_train, X_val, y_train, y_val = train_test_split(
@@ -183,8 +184,8 @@ def train():
             v_loss    = val_loss      / len(val_dl)
 
             print(f"Epoch {epoch+1}/{EPOCHS} | "
-                  f"Train Loss: {t_loss:.4f} Acc: {train_acc:.4f} | "
-                  f"Val Loss: {v_loss:.4f} Acc: {val_acc:.4f}")
+                    f"Train Loss: {t_loss:.4f} Acc: {train_acc:.4f} | "
+                    f"Val Loss: {v_loss:.4f} Acc: {val_acc:.4f}")
 
             # Log per-epoch metrics to MLflow
             mlflow.log_metrics({
@@ -195,7 +196,7 @@ def train():
             }, step=epoch)
 
         # Log final model artifact to S3 via MLflow
-        mlflow.pytorch.log_model(model, artifact_path="resnet18-flair")
+        mlflow.pytorch.log_model(model, name="resnet18-flair")
         print("✅ Model logged to MLflow")
 
 

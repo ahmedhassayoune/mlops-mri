@@ -12,3 +12,31 @@ kaggle.json
 __pycache__/
 *.pyc
 .venv/
+
+# Terraform state
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate
+*.tfstate.backup
+
+# Terraform cache
+.terraform/
+.terraform.lock.hcl
+
+# Variable files (often contain secrets)
+*.tfvars
+*.tfvars.json
+
+# Crash logs
+crash.log
+crash.*.log
+
+# CLI config
+.terraformrc
+terraform.rc
+
+# Sensitive override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
