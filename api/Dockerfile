@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 
 # Env defaults
-ENV MLFLOW_URI="http://your-mlflow-ip:5000" \
+ENV MLFLOW_URI="http://<ip-address>:5000" \
     MODEL_URI="models:/mgmt-prediction/1" \
     DEVICE="cpu"
 

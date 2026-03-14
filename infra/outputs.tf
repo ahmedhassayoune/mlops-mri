@@ -8,7 +8,11 @@ output "mlflow_private_ip" {
   description = "For training instance to access MLflow server (set MLFLOW_URI=http://<ip>:5000 in train.py)"
 }
 
-output "training_instance_ip" {
-  value       = aws_instance.training.public_ip
-  description = "SSH into training instance"
+# output "training_instance_ip" {
+#   value       = aws_instance.training.public_ip
+#   description = "SSH into training instance"
+# }
+
+output "inference_instance_ip" {
+  value = aws_instance.inference.public_ip
 }

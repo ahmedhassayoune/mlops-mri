@@ -71,6 +71,13 @@ resource "aws_security_group" "mlops_sg" {
     cidr_blocks = ["${var.your_ip}/32"]
   }
 
+  ingress {
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    cidr_blocks = ["${var.your_ip}/32"]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -130,26 +137,46 @@ resource "aws_instance" "mlflow_server" {
   }
 }
 
-# ── Training Instance (g4dn.xlarge) ────────────────────
-resource "aws_instance" "training" {
-  ami                    = "ami-0f1a2d75607f08faa"
-  instance_type          = "g4dn.xlarge"
+# # ── Training Instance (g4dn.xlarge) ────────────────────
+# resource "aws_instance" "training" {
+#   ami                    = "ami-0f1a2d75607f08faa"
+#   instance_type          = "g4dn.xlarge"
+#   key_name               = var.key_pair_name
+#   vpc_security_group_ids = [aws_security_group.mlops_sg.id]
+#   iam_instance_profile   = aws_iam_instance_profile.mlflow_profile.name # 👈
+
+#   root_block_device {
+#     volume_size = 200
+#     volume_type = "gp3"
+#   }
+
+#   user_data = <<-EOF
+#     #!/bin/bash
+#     yum update -y
+#     pip3 install torch torchvision nibabel pydicom mlflow boto3 scikit-learn
+#   EOF
+
+#   tags = {
+#     Name = "mri-training"
+#   }
+# }
+
+# ── Inference / API Instance (t3.small) ────────────────
+resource "aws_instance" "inference" {
+  ami                    = "ami-0bb8b77ad97138af1"
+  instance_type          = "t3.small"   # CPU-only, cheap ~$0.02/hr
   key_name               = var.key_pair_name
   vpc_security_group_ids = [aws_security_group.mlops_sg.id]
-  iam_instance_profile   = aws_iam_instance_profile.mlflow_profile.name # 👈
-
-  root_block_device {
-    volume_size = 200
-    volume_type = "gp3"
-  }
 
   user_data = <<-EOF
     #!/bin/bash
     yum update -y
-    pip3 install torch torchvision nibabel pydicom mlflow boto3 scikit-learn
+    yum install docker -y
+    service docker start
+    usermod -aG docker ec2-user
   EOF
 
   tags = {
-    Name = "mri-training"
+    Name = "mri-inference"
   }
 }
