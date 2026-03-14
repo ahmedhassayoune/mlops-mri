@@ -129,15 +129,6 @@ resource "aws_instance" "training" {
   vpc_security_group_ids = [aws_security_group.mlops_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.mlflow_profile.name # 👈
 
-  # ── Spot Instance config ──────────────────────────────
-  instance_market_options {
-    market_type = "spot"
-    spot_options {
-      spot_instance_type             = "persistent" # re-requests spot if interrupted
-      instance_interruption_behavior = "stop"       # stop (not terminate) on interruption
-    }
-  }
-
   root_block_device {
     volume_size = 200
     volume_type = "gp3"
