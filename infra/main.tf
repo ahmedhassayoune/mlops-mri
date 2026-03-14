@@ -79,6 +79,15 @@ resource "aws_security_group" "mlops_sg" {
   }
 }
 
+resource "aws_security_group_rule" "mlflow_internal" {
+  type                     = "ingress"
+  from_port                = 5000
+  to_port                  = 5000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.mlops_sg.id
+  source_security_group_id = aws_security_group.mlops_sg.id
+}
+
 # ── MLflow Tracking Server (t3.medium) ─────────────────
 resource "aws_instance" "mlflow_server" {
   ami                    = "ami-05d43d5e94bb6eb95"
@@ -100,7 +109,7 @@ resource "aws_instance" "mlflow_server" {
     After=network.target
 
     [Service]
-    ExecStart=/usr/local/bin/mlflow server \
+    ExecStart=/home/ec2-user/.local/bin/mlflow server \
       --host 0.0.0.0 \
       --port 5000 \
       --backend-store-uri sqlite:////mlflow/mlruns/mlflow.db \

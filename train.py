@@ -107,8 +107,8 @@ def train():
     s3.download_file(S3_BUCKET, LABELS_KEY, "/tmp/train_labels.csv")
     df = pd.read_csv("/tmp/train_labels.csv")
 
-    patient_ids = df["BraTS21ID"].astype(str).str.zfill(5).tolist()[:32]
-    labels      = df["MGMT_value"].tolist()[:32]
+    patient_ids = df["BraTS21ID"].astype(str).str.zfill(5).tolist()
+    labels      = df["MGMT_value"].tolist()
 
     # Train/val split
     X_train, X_val, y_train, y_val = train_test_split(
