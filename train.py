@@ -48,7 +48,10 @@ class MRIDataset(Dataset):
         nii_path = os.path.join(
             self.data_dir, patient_id, MODALITY, "image.nii.gz"
         )
-        img = nib.load(nii_path).get_fdata()
+        try:
+            img = nib.load(nii_path).get_fdata()
+        except Exception as e:
+            raise RuntimeError(f"Failed loading {nii_path}: {e}")
 
         # Take middle slice as 2D input (most informative slice)
         mid_slice = img[:, :, img.shape[2] // 2]
@@ -69,22 +72,32 @@ class MRIDataset(Dataset):
 # ── Download data from S3 ─────────────────────────────
 def download_data(patient_ids):
     s3 = boto3.client("s3")
+    valid_patients = []
 
     for pid in tqdm(patient_ids, desc="Downloading patients", unit="patient"):
         local_dir = f"{LOCAL_DATA_DIR}/{pid}/{MODALITY}"
         os.makedirs(local_dir, exist_ok=True)
 
-        prefix   = f"{PROCESSED_KEY}/{pid}/{MODALITY}/"
+        prefix = f"{PROCESSED_KEY}/{pid}/{MODALITY}/"
         response = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
 
+        found = False
+
         for obj in response.get("Contents", []):
-            if not obj["Key"].endswith(".nii.gz"):
-                continue
+            if obj["Key"].endswith(".nii.gz"):
+                local_path = f"{local_dir}/image.nii.gz"
+                s3.download_file(S3_BUCKET, obj["Key"], local_path)
+                found = True
+                break
 
-            local_path = f"{local_dir}/image.nii.gz"
-            s3.download_file(S3_BUCKET, obj["Key"], local_path)
+        if found:
+            valid_patients.append(pid)
+        else:
+            print(f"⚠️ Missing file for patient {pid}")
 
-    print(f"✅ Downloaded {len(patient_ids)} patients")
+    print(f"✅ Valid patients: {len(valid_patients)}/{len(patient_ids)}")
+
+    return valid_patients
 
 
 # ── Model ─────────────────────────────────────────────
@@ -119,7 +132,20 @@ def train():
     )
 
     # Download data
-    download_data(X_train + X_val)
+    valid_patients = download_data(X_train + X_val)
+
+    # Keep only valid ones
+    train_set = set(X_train)
+    val_set   = set(X_val)
+
+    X_train = [pid for pid in valid_patients if pid in train_set]
+    X_val   = [pid for pid in valid_patients if pid in val_set]
+
+    # Match labels
+    label_map = dict(zip(patient_ids, labels))
+
+    y_train = [label_map[pid] for pid in X_train]
+    y_val   = [label_map[pid] for pid in X_val]
 
     # Transforms
     transform = transforms.Compose([
