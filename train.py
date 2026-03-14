@@ -13,6 +13,7 @@ from sklearn.model_selection import train_test_split
 import mlflow
 import mlflow.pytorch
 import pandas as pd
+from tqdm import tqdm
 
 # ── Config ────────────────────────────────────────────
 S3_BUCKET      = "s3-mlops-mri-ahassayoune"
@@ -68,7 +69,8 @@ class MRIDataset(Dataset):
 # ── Download data from S3 ─────────────────────────────
 def download_data(patient_ids):
     s3 = boto3.client("s3")
-    for pid in patient_ids:
+
+    for pid in tqdm(patient_ids, desc="Downloading patients", unit="patient"):
         local_dir = f"{LOCAL_DATA_DIR}/{pid}/{MODALITY}"
         os.makedirs(local_dir, exist_ok=True)
 
@@ -78,6 +80,7 @@ def download_data(patient_ids):
         for obj in response.get("Contents", []):
             if not obj["Key"].endswith(".nii.gz"):
                 continue
+
             local_path = f"{local_dir}/image.nii.gz"
             s3.download_file(S3_BUCKET, obj["Key"], local_path)
 
@@ -154,8 +157,9 @@ def train():
             model.train()
             train_loss, train_correct = 0, 0
 
-            for X, y in train_dl:
+            for X, y in tqdm(train_dl, desc=f"Epoch {epoch+1}/{EPOCHS} [Training]", leave=False):
                 X, y = X.to(DEVICE), y.to(DEVICE)
+
                 optimizer.zero_grad()
                 out  = model(X)
                 loss = criterion(out, y)
@@ -170,7 +174,7 @@ def train():
             val_loss, val_correct = 0, 0
 
             with torch.no_grad():
-                for X, y in val_dl:
+                for X, y in tqdm(val_dl, desc=f"Epoch {epoch+1}/{EPOCHS} [Validation]", leave=False):
                     X, y  = X.to(DEVICE), y.to(DEVICE)
                     out   = model(X)
                     loss  = criterion(out, y)
