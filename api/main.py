@@ -1,8 +1,6 @@
 # api/main.py
 
 import os
-import io
-import boto3
 import mlflow
 import mlflow.pytorch
 import nibabel as nib
@@ -18,16 +16,10 @@ MLFLOW_URI    = os.getenv("MLFLOW_URI",    "http://your-mlflow-ip:5000")
 MODEL_URI     = os.getenv("MODEL_URI",     "models:/mgmt-prediction/1")
 DEVICE        = os.getenv("DEVICE",        "cpu")   # CPU is fine for inference
 
-app = FastAPI(
-    title="MGMT Prediction API",
-    description="Predicts MGMT promoter methylation status from MRI NIfTI files",
-    version="1.0.0"
-)
 
 # ── Load model at startup ──────────────────────────────
 # Runs once when the container starts — not on every request
 model = None
-
 
 # on_event is deprecated, use lifespan event handlers instead.
 @asynccontextmanager
@@ -41,6 +33,12 @@ async def lifespan(app: FastAPI):
     yield
     print("Shutting down API...")
 
+app = FastAPI(
+    title="MGMT Prediction API",
+    description="Predicts MGMT promoter methylation status from MRI NIfTI files",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 # ── Preprocessing ──────────────────────────────────────
 def preprocess_nifti(nifti_bytes: bytes) -> torch.Tensor:
@@ -63,7 +61,9 @@ def preprocess_nifti(nifti_bytes: bytes) -> torch.Tensor:
     mid_slice = np.stack([mid_slice] * 3, axis=0).astype(np.float32)
 
     tensor = torch.tensor(mid_slice).unsqueeze(0)  # add batch dim → (1, 3, H, W)
-    tensor = transforms.functional.resize(tensor, [224, 224])
+    resize = transforms.Resize((224,224))
+    tensor = resize(tensor)
+
     return tensor.to(DEVICE)
 
 

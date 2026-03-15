@@ -167,6 +167,7 @@ resource "aws_instance" "inference" {
   instance_type          = "t3.small"   # CPU-only, cheap ~$0.02/hr
   key_name               = var.key_pair_name
   vpc_security_group_ids = [aws_security_group.mlops_sg.id]
+  iam_instance_profile   = aws_iam_instance_profile.mlflow_profile.name # 👈
 
   user_data = <<-EOF
     #!/bin/bash
@@ -175,6 +176,11 @@ resource "aws_instance" "inference" {
     service docker start
     usermod -aG docker ec2-user
   EOF
+
+  root_block_device {
+    volume_size = 30
+    volume_type = "gp3"
+  }
 
   tags = {
     Name = "mri-inference"
